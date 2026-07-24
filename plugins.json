@@ -1,0 +1,23 @@
+[
+    {
+        "iconUrl": "",
+        "fileHash": "sha256-27d0cb0be532017d06a9be01e8b1e3984f72ebe7633d4cc07f29a06294f1ebd1",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/manurocky143a-del/CineMax-CloudStream-Extension",
+        "fileSize": 30073,
+        "status": 1,
+        "language": "ta",
+        "authors": [
+            "CineMax Devs"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "CineMax",
+        "description": "An independent CloudStream extension for CineMax",
+        "url": "https://raw.githubusercontent.com/manurocky143a-del/CineMax-CloudStream-Extension/builds/CineMax.cs3",
+        "name": "CineMax"
+    }
+]

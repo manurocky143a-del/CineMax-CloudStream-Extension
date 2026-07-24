@@ -1,0 +1,8 @@
+{
+  "name": "CineMax",
+  "description": "An independent CloudStream extension for CineMax.",
+  "repositoryUrl": "https://github.com/manurocky143a-del/CineMax-CloudStream-Extension",
+  "pluginLists": [
+    "https://raw.githubusercontent.com/manurocky143a-del/CineMax-CloudStream-Extension/builds/plugins.json"
+  ]
+}
