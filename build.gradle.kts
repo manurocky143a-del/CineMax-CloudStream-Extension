@@ -15,7 +15,7 @@ buildscript {
         classpath("com.android.tools.build:gradle:8.7.3")
         // Cloudstream gradle plugin which makes everything work and builds plugins
         classpath("com.github.recloudstream:gradle:-SNAPSHOT")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.10")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20-RC")
     }
 }
 
@@ -74,7 +74,7 @@ subprojects {
         val implementation by configurations
 
         // Stubs for all Cloudstream classes
-        cloudstream("com.lagradost:cloudstream3:latest.release")
+        cloudstream("com.lagradost:cloudstream3:pre-release")
 
         // these dependencies can include any of those which are added by the app,
         // but you dont need to include any of them if you dont need them

@@ -6,7 +6,7 @@ import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.lagradost.cloudstream3.USER_AGENT
+
 import com.lagradost.nicehttp.Requests
 import com.lagradost.nicehttp.ResponseParser
 import kotlin.reflect.KClass
@@ -40,7 +40,7 @@ val JSONParser = object : ResponseParser {
 }
 
 val app = Requests(responseParser = JSONParser).apply {
-    defaultHeaders = mapOf("User-Agent" to USER_AGENT)
+    defaultHeaders = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0")
 }
 
 inline fun <reified T : Any> parseJson(text: String): T {
