@@ -1,6 +1,7 @@
 package com.cinemax.cloudstreamplugins
 
 import com.cinemax.cloudstreamplugins.entities.EpisodesData
+import com.cinemax.cloudstreamplugins.entities.MiniModalInfo
 import com.cinemax.cloudstreamplugins.entities.PlayList
 import com.cinemax.cloudstreamplugins.entities.PostData
 import com.cinemax.cloudstreamplugins.entities.SearchData
@@ -23,7 +24,7 @@ class CineMaxProvider : MainAPI() {
         TvType.Movie,
         TvType.TvSeries,
     )
-    override var lang = "ta"
+    override var lang = "en"
 
     override var mainUrl = "https://net77.cc"
     override var name = "CineMax"
@@ -34,46 +35,41 @@ class CineMaxProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val cookies = mapOf(
-            "ott" to "nf",
-            "hd" to "on"
+        val categories = listOf(
+            "Trending Movies" to "movie",
+            "Popular Action" to "action",
+            "Comedy" to "comedy",
+            "Popular Drama" to "drama"
         )
-        val document = app.get("$mainUrl/home", cookies = cookies).document
-        val items = document.select(".tray-container, #top10").map {
-            it.toHomePageList()
+        val homePageLists = categories.mapNotNull { (categoryName, query) ->
+            val url = "$mainUrl/search.php?s=$query&t=${APIHolder.unixTime}"
+            try {
+                val data = app.get(url, referer = "$mainUrl/", headers = headers).parsed<SearchData>()
+                val items = data.searchResult.filter { it.id.isNotEmpty() }.map { res ->
+                    val title = if (res.t.isNotEmpty()) res.t else "Title ${res.id}"
+                    newAnimeSearchResponse(title, Id(res.id).toJson()) {
+                        this.posterUrl = "https://img.nfmirrorcdn.top/poster/v/${res.id}.jpg"
+                        posterHeaders = mapOf("Referer" to "$mainUrl/")
+                    }
+                }
+                if (items.isNotEmpty()) HomePageList(categoryName, items) else null
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
         }
-        return newHomePageResponse(items, false)
-    }
 
-    private fun Element.toHomePageList(): HomePageList {
-        val name = select("h2, span").text()
-        val items = select("article, .top10-post").mapNotNull {
-            it.toSearchResult()
-        }
-        return HomePageList(name, items)
-    }
-
-    private fun Element.toSearchResult(): SearchResponse? {
-        val id = selectFirst("a")?.attr("data-post") ?: attr("data-post") ?: return null
-        val posterUrl =
-            fixUrlNull(selectFirst(".card-img-container img, .top10-img img")?.attr("data-src"))
-
-        return newAnimeSearchResponse("", Id(id).toJson()) {
-            this.posterUrl = posterUrl
-            posterHeaders = mapOf("Referer" to "$mainUrl/")
-        }
+        return newHomePageResponse(homePageLists, false)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val cookies = mapOf(
-            "hd" to "on"
-        )
         val url = "$mainUrl/search.php?s=$query&t=${APIHolder.unixTime}"
-        val data = app.get(url, referer = "$mainUrl/", cookies = cookies).parsed<SearchData>()
+        val data = app.get(url, referer = "$mainUrl/", headers = headers).parsed<SearchData>()
 
-        return data.searchResult.map {
-            newAnimeSearchResponse(it.t, Id(it.id).toJson()) {
-                posterUrl = "https://img.nfmirrorcdn.top/poster/v/${it.id}.jpg"
+        return data.searchResult.filter { it.id.isNotEmpty() }.map { res ->
+            val title = if (res.t.isNotEmpty()) res.t else "Title ${res.id}"
+            newAnimeSearchResponse(title, Id(res.id).toJson()) {
+                posterUrl = "https://img.nfmirrorcdn.top/poster/v/${res.id}.jpg"
                 posterHeaders = mapOf("Referer" to "$mainUrl/")
             }
         }
@@ -81,95 +77,75 @@ class CineMaxProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val id = parseJson<Id>(url).id
-        val cookies = mapOf(
-            "hd" to "on"
-        )
-        val data = app.get(
-            "$mainUrl/post.php?id=$id&t=${APIHolder.unixTime}", headers, referer = "$mainUrl/", cookies = cookies
-        ).parsed<PostData>()
+
+        // Fetch mini modal info for metadata (runtime, genre, rating)
+        val miniModalUrl = "$mainUrl/mini-modal-info.php?id=$id&t=${APIHolder.unixTime}"
+        val modalInfo = try {
+            app.get(miniModalUrl, referer = "$mainUrl/", headers = headers).parsed<MiniModalInfo>()
+        } catch (e: Exception) {
+            null
+        }
+
+        // Fetch playlist to retrieve title
+        val playlistUrl = "$mainUrl/playlist.php?id=$id&t=&tm=${APIHolder.unixTime}"
+        val playlist = try {
+            app.get(playlistUrl, referer = "$mainUrl/", headers = headers).parsed<PlayList>()
+        } catch (e: Exception) {
+            null
+        }
+
+        val title = playlist?.firstOrNull()?.title ?: "Title $id"
+        val genres = modalInfo?.genre?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+        val tags = if (modalInfo?.ua != null) listOf(modalInfo.ua) + genres else genres
+        val duration = convertRuntimeToMinutes(modalInfo?.runtime ?: "")
 
         val episodes = arrayListOf<Episode>()
 
-        val title = data.title
-        val castList = data.cast?.split(",")?.map { it.trim() } ?: emptyList()
-        val cast = castList.map {
-            ActorData(
-                Actor(it),
-            )
+        // Try episodes endpoint to see if it's a TV show with seasons/episodes
+        val episodesUrl = "$mainUrl/episodes.php?s=$id&series=$id&t=${APIHolder.unixTime}"
+        val episodesData = try {
+            app.get(episodesUrl, referer = "$mainUrl/", headers = headers).parsed<EpisodesData>()
+        } catch (e: Exception) {
+            null
         }
-        val genre = listOf(data.ua.toString()) + (data.genre?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?: emptyList())
 
-        val runTime = convertRuntimeToMinutes(data.runtime.toString())
-
-        if (data.episodes.first() == null) {
-            episodes.add(newEpisode(LoadData(title, id)) {
-                name = data.title
-            })
+        if (episodesData?.episodes.orEmpty().isNotEmpty()) {
+            episodesData?.episodes?.filterNotNull()?.mapTo(episodes) { ep ->
+                newEpisode(LoadData(title, ep.id)) {
+                    this.name = ep.t
+                    this.episode = ep.ep.replace("E", "").toIntOrNull()
+                    this.season = ep.s.replace("S", "").toIntOrNull()
+                    this.posterUrl = "https://img.nfmirrorcdn.top/epimg/150/${ep.id}.jpg"
+                    this.runTime = ep.time.replace("m", "").toIntOrNull()
+                }
+            }
         } else {
-            data.episodes.filterNotNull().mapTo(episodes) {
-                newEpisode(LoadData(title, it.id)) {
-                    this.name = it.t
-                    this.episode = it.ep.replace("E", "").toIntOrNull()
-                    this.season = it.s.replace("S", "").toIntOrNull()
-                    this.posterUrl = "https://img.nfmirrorcdn.top/epimg/150/${it.id}.jpg"
-                    this.runTime = it.time.replace("m", "").toIntOrNull()
-                }
-            }
-
-            if (data.nextPageShow == 1) {
-                episodes.addAll(getEpisodes(title, url, data.nextPageSeason!!, 2))
-            }
-
-            data.season?.dropLast(1)?.amap {
-                episodes.addAll(getEpisodes(title, url, it.id, 1))
-            }
+            episodes.add(newEpisode(LoadData(title, id)) {
+                this.name = title
+            })
         }
 
-        val type = if (data.episodes.first() == null) TvType.Movie else TvType.TvSeries
+        val isTvSeries = episodesData?.episodes.orEmpty().isNotEmpty() || modalInfo?.runtime?.contains("Season") == true
 
-        return newTvSeriesLoadResponse(title, url, type, episodes) {
-            posterUrl = "https://img.nfmirrorcdn.top/poster/v/$id.jpg"
-            backgroundPosterUrl ="https://img.nfmirrorcdn.top/poster/h/$id.jpg"
-            posterHeaders = mapOf("Referer" to "$mainUrl/")
-            plot = data.desc
-            year = data.year.toIntOrNull()
-            tags = genre
-            actors = cast
-            this.duration = runTime
-        }
-    }
-
-    private suspend fun getEpisodes(
-        title: String, eid: String, sid: String, page: Int
-    ): List<Episode> {
-        val episodes = arrayListOf<Episode>()
-        val cookies = mapOf(
-            "hd" to "on"
-        )
-        var pg = page
-        while (true) {
-            val data = app.get(
-                "$mainUrl/episodes.php?s=$sid&series=$eid&t=${APIHolder.unixTime}&page=$pg",
-                headers,
-                referer = "$mainUrl/",
-                cookies = cookies
-            ).parsed<EpisodesData>()
-            data.episodes?.mapTo(episodes) {
-                newEpisode(LoadData(title, it.id)) {
-                    name = it.t
-                    episode = it.ep.replace("E", "").toIntOrNull()
-                    season = it.s.replace("S", "").toIntOrNull()
-                    this.posterUrl = "https://img.nfmirrorcdn.top/epimg/150/${it.id}.jpg"
-                    this.runTime = it.time.replace("m", "").toIntOrNull()
-                }
+        return if (isTvSeries) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = "https://img.nfmirrorcdn.top/poster/v/$id.jpg"
+                this.backgroundPosterUrl = "https://img.nfmirrorcdn.top/poster/h/$id.jpg"
+                this.posterHeaders = mapOf("Referer" to "$mainUrl/")
+                this.plot = "Watch $title on CineMax"
+                this.tags = tags
+                this.duration = duration
             }
-            if (data.nextPageShow == 0) break
-            pg++
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, LoadData(title, id)) {
+                this.posterUrl = "https://img.nfmirrorcdn.top/poster/v/$id.jpg"
+                this.backgroundPosterUrl = "https://img.nfmirrorcdn.top/poster/h/$id.jpg"
+                this.posterHeaders = mapOf("Referer" to "$mainUrl/")
+                this.plot = "Watch $title on CineMax"
+                this.tags = tags
+                this.duration = duration
+            }
         }
-        return episodes
     }
 
     override suspend fun loadLinks(
@@ -179,27 +155,20 @@ class CineMaxProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val (title, id) = parseJson<LoadData>(data)
-        val cookies = mapOf(
-            "hd" to "on"
-        )
-        val playlist = app.get(
-            "$mainUrl/playlist.php?id=$id&t=$title&tm=${APIHolder.unixTime}",
-            headers,
-            referer = "$mainUrl/",
-            cookies = cookies
-        ).parsed<PlayList>()
+        val playlistUrl = "$mainUrl/playlist.php?id=$id&t=${title.replace(" ", "%20")}&tm=${APIHolder.unixTime}"
+        val playlist = app.get(playlistUrl, referer = "$mainUrl/", headers = headers).parsed<PlayList>()
 
         playlist.forEach { item ->
-            item.sources.forEach {
+            item.sources.forEach { source ->
                 callback.invoke(
                     newExtractorLink(
                         name,
-                        it.label,
-                        fixUrl(it.file),
+                        source.label,
+                        fixUrl(source.file),
                         type = ExtractorLinkType.M3U8
                     ) {
                         this.referer = "$mainUrl/"
-                        this.quality = getQualityFromName(it.file.substringAfter("q=", ""))
+                        this.quality = getQualityFromName(source.file.substringAfter("q=", ""))
                     }
                 )
             }
