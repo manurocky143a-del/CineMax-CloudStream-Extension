@@ -3,7 +3,7 @@ package com.cinemax.cloudstreamplugins
 import com.cinemax.cloudstreamplugins.entities.EpisodesData
 import com.cinemax.cloudstreamplugins.entities.MiniModalInfo
 import com.cinemax.cloudstreamplugins.entities.PlayList
-import com.cinemax.cloudstreamplugins.entities.PostData
+import com.cinemax.cloudstreamplugins.entities.PlayResponse
 import com.cinemax.cloudstreamplugins.entities.SearchData
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -13,6 +13,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.httpsify
 import com.lagradost.cloudstream3.utils.getQualityFromName
+import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -155,20 +156,51 @@ class CineMaxProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val (title, id) = parseJson<LoadData>(data)
+
+        // 1. Fetch fresh playback token "h" from play.php
+        val token = try {
+            val playResp = app.post(
+                "$mainUrl/play.php",
+                headers = mapOf(
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8"
+                ),
+                referer = "$mainUrl/",
+                data = mapOf("id" to id)
+            ).parsed<PlayResponse>()
+            playResp.h
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+
+        // 2. Fetch playlist.php
         val playlistUrl = "$mainUrl/playlist.php?id=$id&t=${title.replace(" ", "%20")}&tm=${APIHolder.unixTime}"
         val playlist = app.get(playlistUrl, referer = "$mainUrl/", headers = headers).parsed<PlayList>()
 
         playlist.forEach { item ->
             item.sources.forEach { source ->
+                var rawFile = source.file
+                if (!token.isNullOrEmpty() && rawFile.contains("in=unknown::ni")) {
+                    rawFile = rawFile.replace("in=unknown::ni", token)
+                }
+
+                val finalUrl = fixUrl(rawFile)
+
                 callback.invoke(
                     newExtractorLink(
                         name,
                         source.label,
-                        fixUrl(source.file),
+                        finalUrl,
                         type = ExtractorLinkType.M3U8
                     ) {
                         this.referer = "$mainUrl/"
                         this.quality = getQualityFromName(source.file.substringAfter("q=", ""))
+                        this.headers = mapOf(
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                            "Referer" to "$mainUrl/",
+                            "Origin" to mainUrl
+                        )
                     }
                 )
             }
@@ -191,8 +223,11 @@ class CineMaxProvider : MainAPI() {
         return object : Interceptor {
             override fun intercept(chain: Interceptor.Chain): Response {
                 val request = chain.request()
-                if (request.url.toString().contains(".m3u8")) {
+                val urlStr = request.url.toString()
+                if (urlStr.contains(".m3u8") || urlStr.contains("nm-cdn")) {
                     val newRequest = request.newBuilder()
+                        .header("Referer", "$mainUrl/")
+                        .header("Origin", mainUrl)
                         .header("Cookie", "hd=on")
                         .build()
                     return chain.proceed(newRequest)
