@@ -25,23 +25,20 @@ class CineMaxProvider : MainAPI() {
     )
     override var lang = "ta"
 
-    override var mainUrl = "https://netfree2.cc"
+    override var mainUrl = "https://net77.cc"
     override var name = "CineMax"
 
     override val hasMainPage = true
-    private var cookie_value = ""
     private val headers = mapOf(
         "X-Requested-With" to "XMLHttpRequest"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        cookie_value = if(cookie_value.isEmpty()) bypass(mainUrl) else cookie_value
         val cookies = mapOf(
-            "t_hash_t" to cookie_value,
             "ott" to "nf",
             "hd" to "on"
         )
-        val document = app.get("$mainUrl/mobile/home", cookies = cookies).document
+        val document = app.get("$mainUrl/home", cookies = cookies).document
         val items = document.select(".tray-container, #top10").map {
             it.toHomePageList()
         }
@@ -68,12 +65,10 @@ class CineMaxProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        cookie_value = if(cookie_value.isEmpty()) bypass(mainUrl) else cookie_value
         val cookies = mapOf(
-            "t_hash_t" to cookie_value,
             "hd" to "on"
         )
-        val url = "$mainUrl/mobile/search.php?s=$query&t=${APIHolder.unixTime}"
+        val url = "$mainUrl/search.php?s=$query&t=${APIHolder.unixTime}"
         val data = app.get(url, referer = "$mainUrl/", cookies = cookies).parsed<SearchData>()
 
         return data.searchResult.map {
@@ -85,14 +80,12 @@ class CineMaxProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        cookie_value = if(cookie_value.isEmpty()) bypass(mainUrl) else cookie_value
         val id = parseJson<Id>(url).id
         val cookies = mapOf(
-            "t_hash_t" to cookie_value,
             "hd" to "on"
         )
         val data = app.get(
-            "$mainUrl/mobile/post.php?id=$id&t=${APIHolder.unixTime}", headers, referer = "$mainUrl/", cookies = cookies
+            "$mainUrl/post.php?id=$id&t=${APIHolder.unixTime}", headers, referer = "$mainUrl/", cookies = cookies
         ).parsed<PostData>()
 
         val episodes = arrayListOf<Episode>()
@@ -154,13 +147,12 @@ class CineMaxProvider : MainAPI() {
     ): List<Episode> {
         val episodes = arrayListOf<Episode>()
         val cookies = mapOf(
-            "t_hash_t" to cookie_value,
             "hd" to "on"
         )
         var pg = page
         while (true) {
             val data = app.get(
-                "$mainUrl/mobile/episodes.php?s=$sid&series=$eid&t=${APIHolder.unixTime}&page=$pg",
+                "$mainUrl/episodes.php?s=$sid&series=$eid&t=${APIHolder.unixTime}&page=$pg",
                 headers,
                 referer = "$mainUrl/",
                 cookies = cookies
@@ -188,11 +180,10 @@ class CineMaxProvider : MainAPI() {
     ): Boolean {
         val (title, id) = parseJson<LoadData>(data)
         val cookies = mapOf(
-            "t_hash_t" to cookie_value,
             "hd" to "on"
         )
         val playlist = app.get(
-            "$mainUrl/mobile/playlist.php?id=$id&t=$title&tm=${APIHolder.unixTime}",
+            "$mainUrl/playlist.php?id=$id&t=$title&tm=${APIHolder.unixTime}",
             headers,
             referer = "$mainUrl/",
             cookies = cookies
